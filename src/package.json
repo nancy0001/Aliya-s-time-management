@@ -1,0 +1,4 @@
+{
+  "note": "The runnable standalone project package.json now lives at the bundle root.",
+  "rootPackage": "../package.json"
+}
