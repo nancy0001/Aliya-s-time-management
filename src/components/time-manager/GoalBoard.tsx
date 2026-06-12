@@ -18,6 +18,7 @@ interface GoalBoardProps {
   onGoalAdd: () => void;
   onGoalMove: (id: string, dir: -1 | 1) => void;
   onGoalCopy: (id: string) => void;
+  onGoalDelete: (id: string) => void;
   onGoalUpdate: (id: string, patch: Partial<GoalTarget>) => void;
 }
 
@@ -34,6 +35,7 @@ export function GoalBoard({
   onGoalAdd,
   onGoalMove,
   onGoalCopy,
+  onGoalDelete,
   onGoalUpdate
 }: GoalBoardProps) {
   return (
@@ -74,7 +76,14 @@ export function GoalBoard({
                           <label><span>目标描述</span><textarea rows={2} value={g.targetDesc} onChange={(e) => onGoalUpdate(g.id, { targetDesc: e.target.value })} /></label>
                           <label><span>执行说明</span><textarea rows={2} value={g.note} onChange={(e) => onGoalUpdate(g.id, { note: e.target.value })} /></label>
                           <label><span>复盘备注</span><textarea rows={2} value={g.reviewNote ?? ""} onChange={(e) => onGoalUpdate(g.id, { reviewNote: e.target.value })} /></label>
-                          <button type="submit">保存目标</button>
+                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button type="submit">保存目标</button>
+                            <button
+                              type="button"
+                              style={{ background: "linear-gradient(180deg,#c0392b,#922b21)" }}
+                              onClick={(e) => { e.preventDefault(); if (window.confirm("确认删除这个目标？")) onGoalDelete(g.id); }}
+                            >删除目标</button>
+                          </div>
                         </form>
                       ) : (
                         <>

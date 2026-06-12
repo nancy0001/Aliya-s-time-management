@@ -35,99 +35,44 @@ import {
   toHm,
   weekStartOf
 } from "./time-manager-utils";
+import type {
+  BiWeekPlan,
+  BucketPlan,
+  GoalCycle,
+  GoalPriority,
+  GoalStatus,
+  GoalTarget,
+  InvestSopItem,
+  InvestSopSection,
+  InvestSopSectionId,
+  MindNode,
+  PeriodPlanState,
+  TimeCategory,
+  TimeEntry
+} from "./time-manager-types";
 import { DataSafetyPanel } from "./components/time-manager/DataSafetyPanel";
 import { GoalBoard } from "./components/time-manager/GoalBoard";
 import { TodayActionPanel } from "./components/time-manager/TodayActionPanel";
 import { AiInsightPanel } from "./components/time-manager/AiInsightPanel";
 import { buildTimeManagerAnalysis } from "./time-manager-analysis";
 
-type TimeCategory = "深度工作" | "沟通协作" | "学习成长" | "健康运动" | "生活事务" | "娱乐放松";
-type GoalCycle = "日度" | "周度" | "月度";
-type GoalPriority = "P0" | "P1" | "P2" | "P3" | "P4" | "P5";
-type GoalStatus = "未开始" | "进行中" | "已完成" | "暂停";
-
-interface TimeEntry {
-  id: string;
-  date: string;
-  category: TimeCategory;
-  minutes: number;
-  note: string;
-}
-
-interface GoalTarget {
-  id: string;
-  taskName: string;
-  cycle: GoalCycle;
-  priority: GoalPriority;
-  targetDesc: string;
-  note: string;
-  expectedMinutes?: number;
-  deadline?: string;
-  status?: GoalStatus;
-  linkedCategory?: TimeCategory;
-  reviewNote?: string;
-}
-
-interface BucketPlan {
-  targets: Record<TimeCategory, number>;
-  notes: Record<TimeCategory, string>;
-}
-
-interface BiWeekPlan {
-  note: string;
-}
-
-type InvestSopSectionId = "preMarket" | "intraday" | "postMarket" | "rules";
-
-interface InvestSopItem {
-  id: string;
-  title: string;
-  note: string;
-  children?: { id: string; title: string }[];
-}
-
-interface InvestSopSection {
-  id: InvestSopSectionId;
-  title: string;
-  intro: string;
-  notes: string;
-  items: InvestSopItem[];
-}
-
-interface MindNode {
-  id: string;
-  title: string;
-  children: MindNode[];
-}
-
-interface PeriodPlanState {
-  goalTargets: GoalTarget[];
-  weeklyPlansByBucket: Record<string, BucketPlan>;
-  monthlyPlansByBucket: Record<string, BucketPlan>;
-  biWeeklyPlansByBucket: Record<string, BiWeekPlan>;
-  investSopByDate: Record<string, InvestSopSection[]>;
-  investMindByDate: Record<string, MindNode>;
-}
 interface LinePointSelection {
   bucketStart: string;
   date: string;
   category: TimeCategory;
   minutes: number;
 }
-interface TimeManagerSyncPayload {
-  version: number;
-  exportedAt: string;
-  entries: TimeEntry[];
-  plans: PeriodPlanState;
-}
 
 const STORAGE_KEY = STORAGE_ENTRY_KEY;
 const PLAN_KEY = STORAGE_PLAN_KEY;
 const LEGACY_PLAN_KEY = STORAGE_LEGACY_PLAN_KEY;
 const FLOW_BASELINE_DATE = "2026-05-07";
-const VERSION = "v2026.05.05.2";
+const VERSION = "v2026.06.13";
 const today = formatLocalDate(new Date());
-const SYNC_VERSION = STORAGE_SYNC_VERSION;
+const ENTRIES_CAP = 2000;
+
+// suppress unused-import warning — STORAGE_SYNC_VERSION is kept for future use
+void STORAGE_SYNC_VERSION;
 
 const timeQuotes = [
   "你不是没时间 你是时间预算没有优先级",
@@ -594,15 +539,26 @@ export default function TimeManagerApp() {
   const [sopDate, setSopDate] = useState(activeSopDateByClock());
   const [calendarBase, setCalendarBase] = useState(today);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(today);
+  const [entryFilter, setEntryFilter] = useState("");
 
   const addEntry = (event: FormEvent) => {
     event.preventDefault();
     const m = Number(minutes);
     if (!m || m <= 0) return;
-    const next = [{ id: uid(), date, category, minutes: m, note: note.trim() }, ...entries].slice(0, 500);
+    const next = [{ id: uid(), date, category, minutes: m, note: note.trim() }, ...entries].slice(0, ENTRIES_CAP);
+    if (entries.length >= ENTRIES_CAP) {
+      console.warn(`[TimeManager] entries cap reached (${ENTRIES_CAP}). Oldest entries were dropped. Consider exporting a JSON backup.`);
+    }
     setEntries(next);
     saveEntries(next);
     setNote("");
+  };
+
+  const deleteEntry = (id: string) => {
+    const next = entries.filter((x) => x.id !== id);
+    setEntries(next);
+    saveEntries(next);
+    setEditingId(null);
   };
 
   const updateEntry = (id: string, patch: Partial<TimeEntry>) => {
@@ -633,6 +589,10 @@ export default function TimeManagerApp() {
       arr.splice(idx + 1, 0, copy);
       return { ...prev, goalTargets: arr };
     });
+  };
+  const goalDelete = (id: string) => {
+    setPlans((prev) => ({ ...prev, goalTargets: prev.goalTargets.filter((g) => g.id !== id) }));
+    setEditingGoalId(null);
   };
   const goalAdd = () => {
     setPlans((prev) => ({
@@ -1169,6 +1129,12 @@ export default function TimeManagerApp() {
   const selectedDayTotal = useMemo(() => selectedDayEntries.reduce((s, x) => s + x.minutes, 0), [selectedDayEntries]);
   const timeAnalysis = useMemo(() => buildTimeManagerAnalysis(entries, plans, today), [entries, plans]);
 
+  const filteredEntries = useMemo(() => {
+    const q = entryFilter.trim().toLowerCase();
+    if (!q) return entries.slice(0, 30);
+    return entries.filter((x) => x.category.includes(q) || (x.note || "").toLowerCase().includes(q) || x.date.includes(q)).slice(0, 30);
+  }, [entries, entryFilter]);
+
   const monthTitle = useMemo(() => {
     const d = new Date(calendarBase);
     return `${d.getFullYear()}年${d.getMonth() + 1}月`;
@@ -1227,6 +1193,7 @@ export default function TimeManagerApp() {
         onGoalAdd={goalAdd}
         onGoalMove={goalMove}
         onGoalCopy={goalCopy}
+        onGoalDelete={goalDelete}
         onGoalUpdate={updateGoal}
       />
 
@@ -1388,7 +1355,21 @@ export default function TimeManagerApp() {
         })}
       </section>
 
-      <section className="section"><div className="section-heading"><h2>最近记录</h2></div><div className="card"><ul className="log-list">{entries.length === 0 ? <li><span>暂无记录</span></li> : entries.slice(0, 30).map((item) => (<li key={item.id} onClick={() => setEditingId(item.id)}>{editingId === item.id ? (<form className="form-grid" onSubmit={(e) => { e.preventDefault(); setEditingId(null); }}><label><span>日期</span><input type="date" value={item.date} onChange={(e) => updateEntry(item.id, { date: e.target.value })} /></label><label><span>分类</span><select value={item.category} onChange={(e) => updateEntry(item.id, { category: e.target.value as TimeCategory })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label><label><span>投入分钟</span><input type="number" min="5" step="5" value={item.minutes} onChange={(e) => updateEntry(item.id, { minutes: Number(e.target.value || 0) })} /></label><label><span>说明</span><textarea rows={2} value={item.note} onChange={(e) => updateEntry(item.id, { note: e.target.value })} /></label><button type="submit">保存修改</button></form>) : (<><strong>{item.date} · {item.category}</strong><span className="detail-line"><span className="detail-key">投入</span><span className="detail-value">{item.minutes} 分钟</span></span><span className="detail-line"><span className="detail-key">说明</span><span className="detail-value">{item.note || "-"}</span></span></>)}</li>))}</ul></div></section>
+      <section className="section"><div className="section-heading"><h2>最近记录</h2></div><div className="card">
+        <div style={{ marginBottom: "0.6rem" }}>
+          <input
+            type="search"
+            placeholder="按分类、日期或关键词筛选…"
+            value={entryFilter}
+            onChange={(e) => setEntryFilter(e.target.value)}
+            style={{ width: "100%" }}
+            aria-label="筛选时间记录"
+          />
+        </div>
+        <ul className="log-list">{filteredEntries.length === 0 ? <li><span>暂无记录</span></li> : filteredEntries.map((item) => (<li key={item.id} onClick={() => setEditingId(item.id)}>{editingId === item.id ? (<form className="form-grid" onSubmit={(e) => { e.preventDefault(); setEditingId(null); }}><label><span>日期</span><input type="date" value={item.date} onChange={(e) => updateEntry(item.id, { date: e.target.value })} /></label><label><span>分类</span><select value={item.category} onChange={(e) => updateEntry(item.id, { category: e.target.value as TimeCategory })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label><label><span>投入分钟</span><input type="number" min="5" step="5" value={item.minutes} onChange={(e) => updateEntry(item.id, { minutes: Number(e.target.value || 0) })} /></label><label><span>说明</span><textarea rows={2} value={item.note} onChange={(e) => updateEntry(item.id, { note: e.target.value })} /></label><div style={{ display: "flex", gap: "0.5rem" }}><button type="submit">保存修改</button><button type="button" style={{ background: "linear-gradient(180deg,#c0392b,#922b21)" }} onClick={(e) => { e.preventDefault(); if (window.confirm("确认删除这条记录？")) deleteEntry(item.id); }}>删除记录</button></div></form>) : (<><strong>{item.date} · {item.category}</strong><span className="detail-line"><span className="detail-key">投入</span><span className="detail-value">{item.minutes} 分钟</span></span><span className="detail-line"><span className="detail-key">说明</span><span className="detail-value">{item.note || "-"}</span></span></>)}</li>))}</ul>
+        {entryFilter && <p className="muted-copy" style={{ marginTop: "0.4rem" }}>显示前 {filteredEntries.length} 条匹配结果（共 {entries.length} 条记录）</p>}
+        {!entryFilter && entries.length > 30 && <p className="muted-copy" style={{ marginTop: "0.4rem" }}>显示最近 30 条，共 {entries.length} 条记录。可使用上方搜索框筛选。</p>}
+      </div></section>
 
       <section className="section">
         <div className="section-heading">
