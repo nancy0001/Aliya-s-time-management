@@ -1108,9 +1108,9 @@ export default function TimeManagerApp() {
     }
   };
 
-  const exportJsonBackup = () => {
+  const exportJsonBackup = async () => {
     const payload = buildTimeManagerPayload(entries, plans, "manual");
-    downloadJsonBackup(payload);
+    await downloadJsonBackup(payload);
     setBackupMeta(readLastBackupMeta());
     setSyncMessage(`JSON备份已导出：${entries.length} 条记录`);
   };

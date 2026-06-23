@@ -109,13 +109,51 @@ export function readImportSnapshot(): TimeManagerBackupPayload | null {
   }
 }
 
-export function downloadJsonBackup(payload: TimeManagerBackupPayload) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+// Timestamp format: 2026-06-23T15-30-00 (colons replaced for filesystem compatibility)
+function backupFilename(exportedAt: string) {
+  const ts = exportedAt.slice(0, 19).replace(/:/g, "-");
+  return `aliya-time-manager-backup-${ts}.json`;
+}
+
+// Fallback: legacy anchor-click download
+function downloadJsonFallback(json: string, filename: string) {
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `aliya-time-manager-backup-${payload.exportedAt.slice(0, 10)}.json`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+export async function downloadJsonBackup(payload: TimeManagerBackupPayload) {
+  const json = JSON.stringify(payload, null, 2);
+  const filename = backupFilename(payload.exportedAt);
+
+  // Try File System Access API (Chrome 86+, Edge 86+)
+  // showSaveFilePicker lets the user pick a folder once; the browser remembers the permission.
+  if (typeof (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker === "function") {
+    try {
+      const handle = await (window as unknown as {
+        showSaveFilePicker: (opts: unknown) => Promise<{ createWritable: () => Promise<{ write: (d: string) => Promise<void>; close: () => Promise<void> }> }>
+      }).showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: "JSON 备份", accept: { "application/json": [".json"] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      saveLastBackupMeta(payload);
+      return;
+    } catch (err) {
+      // User cancelled the picker — don't fall through to the old method
+      if ((err as { name?: string }).name === "AbortError") return;
+      // Other errors (permission denied etc.) — fall through to fallback
+      console.warn("[TimeManager] showSaveFilePicker failed, using fallback download:", err);
+    }
+  }
+
+  // Fallback for Safari / Firefox / non-supporting browsers
+  downloadJsonFallback(json, filename);
   saveLastBackupMeta(payload);
 }
 
