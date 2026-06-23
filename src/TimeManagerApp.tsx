@@ -55,6 +55,16 @@ import { GoalBoard } from "./components/time-manager/GoalBoard";
 import { TodayActionPanel } from "./components/time-manager/TodayActionPanel";
 import { AiInsightPanel } from "./components/time-manager/AiInsightPanel";
 import { buildTimeManagerAnalysis } from "./time-manager-analysis";
+import {
+  serverAvailable,
+  apiGetEntries,
+  apiAddEntry,
+  apiUpdateEntry,
+  apiDeleteEntry,
+  apiBulkUpsertEntries,
+  apiGetPlans,
+  apiSavePlans
+} from "./time-manager-api";
 
 interface LinePointSelection {
   bucketStart: string;
@@ -524,6 +534,7 @@ function MindTreeEditor({
 export default function TimeManagerApp() {
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [entries, setEntries] = useState<TimeEntry[]>(readEntries());
+  const [serverMode, setServerMode] = useState(false); // true = API is available
   const [date, setDate] = useState(today);
   const [category, setCategory] = useState<TimeCategory>("深度工作");
   const [minutes, setMinutes] = useState("60");
@@ -545,13 +556,15 @@ export default function TimeManagerApp() {
     event.preventDefault();
     const m = Number(minutes);
     if (!m || m <= 0) return;
-    const next = [{ id: uid(), date, category, minutes: m, note: note.trim() }, ...entries].slice(0, ENTRIES_CAP);
+    const newEntry = { id: uid(), date, category, minutes: m, note: note.trim() };
+    const next = [newEntry, ...entries].slice(0, ENTRIES_CAP);
     if (entries.length >= ENTRIES_CAP) {
       console.warn(`[TimeManager] entries cap reached (${ENTRIES_CAP}). Oldest entries were dropped. Consider exporting a JSON backup.`);
     }
     setEntries(next);
     saveEntries(next);
     setNote("");
+    if (serverMode) apiAddEntry(newEntry).catch((err) => console.warn("[TimeManager] API addEntry failed:", err));
   };
 
   const deleteEntry = (id: string) => {
@@ -559,12 +572,14 @@ export default function TimeManagerApp() {
     setEntries(next);
     saveEntries(next);
     setEditingId(null);
+    if (serverMode) apiDeleteEntry(id).catch((err) => console.warn("[TimeManager] API deleteEntry failed:", err));
   };
 
   const updateEntry = (id: string, patch: Partial<TimeEntry>) => {
     const next = entries.map((x) => (x.id === id ? { ...x, ...patch } : x));
     setEntries(next);
     saveEntries(next);
+    if (serverMode) apiUpdateEntry(id, patch).catch((err) => console.warn("[TimeManager] API updateEntry failed:", err));
   };
 
   const goalMove = (id: string, dir: -1 | 1) => {
@@ -985,9 +1000,41 @@ export default function TimeManagerApp() {
     const timer = window.setInterval(tick, 60000);
     return () => window.clearInterval(timer);
   }, []);
+  // On mount: probe server; if available, load entries+plans from API and sync any local-only data up
+  useEffect(() => {
+    serverAvailable().then(async (available) => {
+      setServerMode(available);
+      if (!available) return;
+      try {
+        const [serverEntries, serverPlans] = await Promise.all([apiGetEntries(), apiGetPlans()]);
+        const localEntries = readEntries();
+        // Prefer server data as source of truth; bulk-push any local-only entries
+        const serverIds = new Set(serverEntries.map((e) => e.id));
+        const localOnly = localEntries.filter((e) => !serverIds.has(e.id) && !e.id.startsWith("seed-") && !e.id.startsWith("recover-"));
+        if (localOnly.length > 0) {
+          await apiBulkUpsertEntries(localOnly).catch(() => {});
+        }
+        // Use server entries as the authoritative list
+        const merged = serverEntries.length > 0 ? serverEntries : localEntries;
+        setEntries(merged);
+        saveEntries(merged);
+        // Use server plans if they have any data
+        if (serverPlans.goalTargets && serverPlans.goalTargets.length > 0) {
+          setPlans(serverPlans);
+          savePlans(serverPlans);
+        }
+      } catch (err) {
+        console.warn("[TimeManager] failed to load from server, using localStorage:", err);
+        setServerMode(false);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     savePlans(plans);
-  }, [plans]);
+    if (serverMode) apiSavePlans(plans).catch((err) => console.warn("[TimeManager] API savePlans failed:", err));
+  }, [plans, serverMode]);
 
   useEffect(() => {
     const hash = window.location.hash || "";
@@ -1169,7 +1216,7 @@ export default function TimeManagerApp() {
         onCopySyncLink={copySyncLink}
         onImportJsonChange={importJsonBackup}
       />
-      <header className="hero"><div><p className="eyebrow">Aliya Time Manager</p><h1>时间管理主页面</h1><p className="hero-copy">记录每天时间投入，围绕目标管理时间预算、执行记录与复盘。目标管理作为副页面，用来沉淀方向和优先级。版本 {VERSION}</p></div></header>
+      <header className="hero"><div><p className="eyebrow">Aliya Time Manager</p><h1>时间管理主页面</h1><p className="hero-copy">记录每天时间投入，围绕目标管理时间预算、执行记录与复盘。目标管理作为副页面，用来沉淀方向和优先级。版本 {VERSION} · <span style={{ color: serverMode ? "#4a9a5e" : "#b08040" }}>{serverMode ? "☁️ 云端存储" : "💾 本地存储"}</span></p></div></header>
       <section className="quote-rotator"><span className="quote-meta">时间管理语录 {quoteIndex + 1}/{timeQuotes.length}</span><p>{timeQuotes[quoteIndex]}</p></section>
 
       <TodayActionPanel

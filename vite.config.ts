@@ -8,6 +8,7 @@ export default defineConfig({
     port: 5174,
     strictPort: false,
     proxy: {
+      // In dev, proxy /api to the local Node server on port 4000
       "/api": "http://localhost:4000"
     }
   },
