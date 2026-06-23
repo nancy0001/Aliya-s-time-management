@@ -1045,3 +1045,49 @@ textarea {
   gap: 0.42rem;
   align-items: center;
 }
+
+/* ── Mobile responsive fixes ─────────────────────────────────────────────── */
+
+/* SVG line chart: prevent overflow on narrow screens */
+.morandi-time svg {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 768px) {
+  /* Two-column grids collapse to single column */
+  .dual-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Goal board: already collapses at 960px, also ensure single col at mobile */
+  .goal-cycle-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Review grid: 4 columns → 2 columns on mobile */
+  .review-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* Calendar / flip-column inline grid → stack vertically */
+  .morandi-time .flip-column {
+    min-height: auto !important;
+  }
+
+  /* Fixed SOP flow: 4 columns → 2 on mobile */
+  .morandi-time .fixed-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* App shell padding reduction */
+  .app-shell {
+    padding: 0.75rem 0.6rem 2rem;
+  }
+
+  /* Stat cards: allow wrap */
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+}

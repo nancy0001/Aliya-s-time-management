@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import type { TimeCategory, TimeEntry } from "../../time-manager-types";
-import { sumMinutes } from "../../time-manager-utils";
+import { shiftDate, sumMinutes } from "../../time-manager-utils";
 
 interface TodayActionPanelProps {
   date: string;
@@ -9,6 +9,8 @@ interface TodayActionPanelProps {
   note: string;
   todayEntries: TimeEntry[];
   biEntries: TimeEntry[];
+  allEntries: TimeEntry[];
+  today: string;
   onSubmit: (event: FormEvent) => void;
   onDateChange: (value: string) => void;
   onCategoryChange: (value: TimeCategory) => void;
@@ -23,6 +25,8 @@ export function TodayActionPanel({
   note,
   todayEntries,
   biEntries,
+  allEntries,
+  today,
   onSubmit,
   onDateChange,
   onCategoryChange,
@@ -30,6 +34,9 @@ export function TodayActionPanel({
   onNoteChange
 }: TodayActionPanelProps) {
   const todayTotal = sumMinutes(todayEntries);
+  const yesterday = shiftDate(today, -1);
+  const yesterdayEntries = allEntries.filter((x) => x.date === yesterday);
+
   return (
     <section className="section">
       <div className="section-heading"><h2>今日行动台</h2><p>优先完成今日登记、查看投入结构和补录遗漏。</p></div>
@@ -48,6 +55,29 @@ export function TodayActionPanel({
             </div>
             <button type="submit">保存记录</button>
           </form>
+          {yesterdayEntries.length > 0 && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <p className="muted-copy" style={{ marginBottom: "0.35rem" }}>昨日复制（点击预填表单）</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {yesterdayEntries.map((item) => (
+                  <button
+                    key={`copy-${item.id}`}
+                    type="button"
+                    className="entry-toggle"
+                    style={{ fontSize: "0.78rem" }}
+                    onClick={() => {
+                      onDateChange(today);
+                      onCategoryChange(item.category);
+                      onMinutesChange(String(item.minutes));
+                      onNoteChange(item.note || "");
+                    }}
+                  >
+                    {item.category} · {item.minutes}m
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="card">
           <strong>今日概览</strong>

@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildTimeManagerPayload,
   decodePayload,
@@ -707,7 +707,7 @@ export default function TimeManagerApp() {
     return { label: monthKey, expected, actual, delta, completion, tone: reviewTone(actual, expected) };
   }, [monthlyBuckets, plans.monthlyPlansByBucket]);
 
-  const ensureSopDate = (dateKey: string) => {
+  const ensureSopDate = useCallback((dateKey: string) => {
     setPlans((prev) => {
       if (prev.investSopByDate[dateKey]) return prev;
       return {
@@ -722,7 +722,7 @@ export default function TimeManagerApp() {
         }
       };
     });
-  };
+  }, []);
 
   const updateSopSectionsByDate = (dateKey: string, updater: (sections: InvestSopSection[]) => InvestSopSection[]) => {
     setPlans((prev) => {
@@ -989,7 +989,7 @@ export default function TimeManagerApp() {
   }, []);
   useEffect(() => {
     ensureSopDate(sopDate);
-  }, [sopDate]);
+  }, [sopDate, ensureSopDate]);
   useEffect(() => {
     const tick = () => {
       const next = activeSopDateByClock();
@@ -999,7 +999,7 @@ export default function TimeManagerApp() {
     tick();
     const timer = window.setInterval(tick, 60000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [ensureSopDate]);
   // On mount: probe server; if available, load entries+plans from API and sync any local-only data up
   useEffect(() => {
     serverAvailable().then(async (available) => {
@@ -1226,6 +1226,8 @@ export default function TimeManagerApp() {
         note={note}
         todayEntries={todayEntries}
         biEntries={biEntries}
+        allEntries={entries}
+        today={today}
         onSubmit={addEntry}
         onDateChange={setDate}
         onCategoryChange={setCategory}
