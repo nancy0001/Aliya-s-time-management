@@ -40,6 +40,7 @@ import { GoalBoard } from "./components/time-manager/GoalBoard";
 import { TodayActionPanel } from "./components/time-manager/TodayActionPanel";
 import { AiInsightPanel } from "./components/time-manager/AiInsightPanel";
 import { buildTimeManagerAnalysis } from "./time-manager-analysis";
+import bundledBackup from "./data/aliya-time-manager-backup-2026-06-12.json";
 
 type TimeCategory = "深度工作" | "沟通协作" | "学习成长" | "健康运动" | "生活事务" | "娱乐放松";
 type GoalCycle = "日度" | "周度" | "月度";
@@ -119,6 +120,11 @@ interface TimeManagerSyncPayload {
   exportedAt: string;
   entries: TimeEntry[];
   plans: PeriodPlanState;
+}
+
+interface TimeManagerBackupPayload extends TimeManagerSyncPayload {
+  origin?: string;
+  backupKind?: "manual" | "snapshot" | "sync";
 }
 
 const STORAGE_KEY = STORAGE_ENTRY_KEY;
@@ -379,7 +385,6 @@ function migrateLegacyPlanInto(base: PeriodPlanState, legacy: any): PeriodPlanSt
 }
 
 function readEntries(): TimeEntry[] {
-  const raw = localStorage.getItem(STORAGE_KEY);
   const legacyKeys = ["aliya-time-manager-v0", "aliya-time-manager", "time-manager-entries"];
   const mergeMap = new Map<string, TimeEntry>();
   const pushEntries = (list: TimeEntry[]) => {
@@ -389,6 +394,23 @@ function readEntries(): TimeEntry[] {
     });
   };
   pushEntries(RECOVERY_ENTRIES_0510_0511);
+  const bundledBackupEntries = Array.isArray((bundledBackup as TimeManagerBackupPayload).entries)
+    ? (bundledBackup as TimeManagerBackupPayload).entries.filter((x) => x?.date && x?.category)
+    : [];
+  pushEntries(bundledBackupEntries);
+  return Array.from(mergeMap.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+function readEntriesFromStorage(): TimeEntry[] {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const legacyKeys = ["aliya-time-manager-v0", "aliya-time-manager", "time-manager-entries"];
+  const mergeMap = new Map<string, TimeEntry>();
+  const pushEntries = (list: TimeEntry[]) => {
+    list.forEach((item) => {
+      const key = `${item.date}-${item.category}-${item.minutes}-${item.note || ""}`;
+      mergeMap.set(key, item);
+    });
+  };
   const persistedEntries: TimeEntry[] = [];
   legacyKeys.forEach((key) => {
     const legacyRaw = localStorage.getItem(key);
@@ -426,6 +448,19 @@ function readEntries(): TimeEntry[] {
     return SEEDED_ENTRIES;
   }
 }
+
+function mergedBundledEntries(): TimeEntry[] {
+  const bundled = readEntries();
+  const stored = readEntriesFromStorage();
+  if (stored.length <= bundled.length) return bundled;
+  const mergeMap = new Map<string, TimeEntry>();
+  [...bundled, ...stored].forEach((item) => {
+    const key = `${item.date}-${item.category}-${item.minutes}-${item.note || ""}`;
+    mergeMap.set(key, item);
+  });
+  return Array.from(mergeMap.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 function saveEntries(entries: TimeEntry[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
@@ -599,7 +634,7 @@ export default function TimeManagerApp() {
     event.preventDefault();
     const m = Number(minutes);
     if (!m || m <= 0) return;
-    const next = [{ id: uid(), date, category, minutes: m, note: note.trim() }, ...entries].slice(0, 500);
+    const next = [{ id: uid(), date, category, minutes: m, note: note.trim() }, ...entries];
     setEntries(next);
     saveEntries(next);
     setNote("");
@@ -1030,6 +1065,14 @@ export default function TimeManagerApp() {
   }, [plans]);
 
   useEffect(() => {
+    const merged = mergedBundledEntries();
+    if (merged.length > entries.length) {
+      setEntries(merged);
+      saveEntries(merged);
+    }
+  }, []);
+
+  useEffect(() => {
     const hash = window.location.hash || "";
     const prefix = "#sync=";
     if (!hash.startsWith(prefix)) return;
@@ -1086,9 +1129,7 @@ export default function TimeManagerApp() {
   const copySyncLink = async () => {
     const payload = buildTimeManagerPayload(entries, plans, "sync");
     const code = encodePayload(payload);
-    const targetOrigin = window.location.origin.includes("127.0.0.1")
-      ? "http://localhost:5174"
-      : "http://127.0.0.1:5174";
+    const targetOrigin = "http://127.0.0.1:5174";
     const link = `${targetOrigin}/time-manager#sync=${encodeURIComponent(code)}`;
     try {
       await navigator.clipboard.writeText(link);
