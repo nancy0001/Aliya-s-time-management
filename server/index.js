@@ -185,6 +185,68 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, entries: count.n });
 });
 
+// ── Feishu OAuth callback ─────────────────────────────────────────────────────
+// After user authorizes, Feishu redirects here with ?code=XXX
+// The server exchanges the code for user_access_token and stores it in the KV table.
+app.get("/feishu-callback", async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).send("Missing code parameter");
+  }
+  const APP_ID = process.env.FEISHU_APP_ID || "";
+  const APP_SECRET = process.env.FEISHU_APP_SECRET || "";
+  if (!APP_ID || !APP_SECRET) {
+    return res.status(500).send("FEISHU_APP_ID / FEISHU_APP_SECRET not configured");
+  }
+  try {
+    const fetch = (await import("node-fetch")).default;
+    // Exchange code for user_access_token
+    const tokenResp = await fetch("https://open.feishu.cn/open-apis/authen/v1/oidc/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", code, app_access_token: "" })
+    });
+    // Use the older v1 endpoint which works with app credentials
+    const tenantResp = await fetch("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ app_id: APP_ID, app_secret: APP_SECRET })
+    });
+    const tenantData = await tenantResp.json();
+    const appToken = tenantData.tenant_access_token;
+
+    const userResp = await fetch("https://open.feishu.cn/open-apis/authen/v1/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${appToken}` },
+      body: JSON.stringify({ grant_type: "authorization_code", code })
+    });
+    const userData = await userResp.json();
+    if (userData.code !== 0) {
+      return res.status(400).send(`Token exchange failed: ${JSON.stringify(userData)}`);
+    }
+    const userToken = userData.data.access_token;
+    const refreshToken = userData.data.refresh_token;
+    const expiresIn = userData.data.expires_in;
+    // Store in KV table
+    db.prepare("INSERT INTO app_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')")
+      .run("feishu_user_token", userToken);
+    db.prepare("INSERT INTO app_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')")
+      .run("feishu_refresh_token", refreshToken);
+    console.log(`[feishu-oauth] user token stored, expires in ${expiresIn}s`);
+    res.send(`<html><body><h2>✅ 授权成功！</h2><p>用户 token 已保存，现在可以关闭此页面。</p><script>setTimeout(()=>window.close(),3000)</script></body></html>`);
+  } catch (err) {
+    console.error("[feishu-oauth] error:", err);
+    res.status(500).send(`Error: ${err.message}`);
+  }
+});
+
+// GET /api/feishu-token-status — check if user token is stored
+app.get("/api/feishu-token-status", (_req, res) => {
+  const row = db.prepare("SELECT value, updated_at FROM app_kv WHERE key = 'feishu_user_token'").get();
+  if (!row) return res.json({ stored: false });
+  res.json({ stored: true, updated_at: row.updated_at });
+});
+
 // ── Serve frontend static files in production ─────────────────────────────────
 if (fs.existsSync(DIST_DIR)) {
   app.use(express.static(DIST_DIR));
